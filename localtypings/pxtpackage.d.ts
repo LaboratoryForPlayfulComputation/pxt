@@ -75,6 +75,7 @@ declare namespace pxt {
         color?: string; // for new category, category color
         advanced?: boolean; // for new category, is category advanced
         localUrl?: string; // local debugging URL used when served through pxt serve and debugExtensions=1 mode
+        coreExtension?: boolean; // @LPC@ Specifies whether or not this extension is in a bundled package
     }
 
     interface PlatformIOConfig {

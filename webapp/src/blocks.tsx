@@ -718,7 +718,8 @@ export class Editor extends toolboxeditor.ToolboxEditor {
                     .map(ep => ep.getKsPkg()).map(p => !!p && p.config)
                     // Make sure the package has extensions enabled, and is a github package.
                     // Extensions are limited to github packages and ghpages, as we infer their url from the installedVersion config
-                    .filter(config => !!config && !!config.extension && /^(file:|github:)/.test(config.installedVersion));
+                    // @LPC@ if the extension is defined with coreExtension == true, ignore the previous line
+                    .filter(config => !!config && !!config.extension && (config.extension.coreExtension || /^(file:|github:)/.test(config.installedVersion)));
 
                 // Initialize the "Make a function" button
                 Blockly.Functions.editFunctionExternalHandler = (mutation: Element, cb: Blockly.Functions.ConfirmEditCallback) => {
@@ -990,10 +991,12 @@ export class Editor extends toolboxeditor.ToolboxEditor {
                 const repoStatus = pxt.github.repoStatus(parsedRepo, config);
                 const repoName = parsedRepo.fullName.substr(parsedRepo.fullName.indexOf(`/`) + 1);
                 const localDebug = pxt.BrowserUtils.isLocalHost() && /^file:/.test(extension.installedVersion) && extension.extension.localUrl;
+                // @LPC@ if we are using a corepackage, then escape the github logic TODO: path should be relative to document root
+                const isCoreExtension = extension.extension.coreExtension;
                 const debug = pxt.BrowserUtils.isLocalHost() && /debugExtensions/i.test(window.location.href);
                 /* tslint:disable:no-http-string */
                 const url = debug ? "http://localhost:3232/extension.html"
-                    : localDebug ? extension.extension.localUrl : `https://${parsedRepo.owner}.github.io/${repoName}/`;
+                    : (localDebug || isCoreExtension /*@LPC@*/) ? extension.extension.localUrl : `https://${parsedRepo.owner}.github.io/${repoName}/`;
                 /* tslint:enable:no-http-string */
                 this.parent.openExtension(extension.name, url, repoStatus == 0); // repoStatus can only be APPROVED or UNKNOWN at this point
             });
