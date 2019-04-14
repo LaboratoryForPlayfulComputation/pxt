@@ -113,6 +113,9 @@ export class ProjectView
 
     private runToken: pxt.Util.CancellationToken;
 
+    // @LPC@ stores whether or not the editor has a simulator
+    private disableSimulator: boolean;
+
     constructor(props: IAppProps) {
         super(props);
         document.title = pxt.appTarget.title || pxt.appTarget.name;
@@ -123,15 +126,19 @@ export class ProjectView
         const isHighContrast = /hc=(\w+)/.test(window.location.href);
         if (isHighContrast) core.setHighContrast(true);
 
-        const simcfg = pxt.appTarget.simulator;
+        // @LPC@ changes to make the simulator removable
+        this.disableSimulator = !!pxt.appTarget.disableSimulator;
+
+        const simcfg: pxt.AppSimulator = pxt.appTarget.simulator || {};
         this.state = {
             showFiles: false,
             home: shouldShowHomeScreen,
             active: document.visibilityState == 'visible' || pxt.BrowserUtils.isElectron() || pxt.winrt.isWinRT() || pxt.appTarget.appTheme.dontSuspendOnVisibility,
             // don't start collapsed in mobile since we can go fullscreen now
-            collapseEditorTools: simcfg.headless,
+            collapseEditorTools: this.disableSimulator || simcfg.headless,
             highContrast: isHighContrast,
-            simState: pxt.editor.SimState.Stopped,
+            // @LPC@ The simulator should never be able to leave the disabled state
+            simState: this.disableSimulator ? pxt.editor.SimState.Disabled : pxt.editor.SimState.Stopped,
             autoRun: this.autoRunOnStart()
         };
         if (!this.settings.editorFontSize) this.settings.editorFontSize = /mobile/i.test(navigator.userAgent) ? 15 : 19;
@@ -148,36 +155,39 @@ export class ProjectView
     }
 
     private autoRunOnStart() {
-        return pxt.appTarget.simulator && (pxt.appTarget.simulator.autoRun || !!pxt.appTarget.simulator.emptyRunCode)
+        // @LPC@ Ignore autoRun behavior if the simulator is removed
+        return (!this.disableSimulator) && (pxt.appTarget.simulator && (pxt.appTarget.simulator.autoRun || !!pxt.appTarget.simulator.emptyRunCode));
     }
 
     private initScreenshots() {
-        window.addEventListener('message', (ev: MessageEvent) => {
-            let msg = ev.data as pxsim.SimulatorMessage;
-            if (!msg || !this.state.header) return;
+        if (!this.disableSimulator) {
+            window.addEventListener('message', (ev: MessageEvent) => {
+                let msg = ev.data as pxsim.SimulatorMessage;
+                if (!msg || !this.state.header) return;
 
-            if (msg.type == "screenshot") {
-                const scmsg = msg as pxsim.SimulatorScreenshotMessage;
-                if (!scmsg.data) return;
-                const handler = this.screenshotHandlers[this.screenshotHandlers.length - 1];
-                if (handler)
-                    handler(scmsg)
-                else {
-                    const pngString = pxt.BrowserUtils.imageDataToPNG(scmsg.data);
-                    if (pxt.appTarget.compile.saveAsPNG)
-                        this.encodeProjectAsPNGAsync(pngString, false).done();
-                    screenshot.saveAsync(this.state.header, pngString)
-                        .done(() => { pxt.debug('screenshot saved') })
+                if (msg.type == "screenshot") {
+                    const scmsg = msg as pxsim.SimulatorScreenshotMessage;
+                    if (!scmsg.data) return;
+                    const handler = this.screenshotHandlers[this.screenshotHandlers.length - 1];
+                    if (handler)
+                        handler(scmsg)
+                    else {
+                        const pngString = pxt.BrowserUtils.imageDataToPNG(scmsg.data);
+                        if (pxt.appTarget.compile.saveAsPNG)
+                            this.encodeProjectAsPNGAsync(pngString, false).done();
+                        screenshot.saveAsync(this.state.header, pngString)
+                            .done(() => { pxt.debug('screenshot saved') })
+                    }
+                } else if (msg.type == "recorder") {
+                    const scmsg = msg as pxsim.SimulatorRecorderMessage;
+                    const handler = this.screenshotHandlers[this.screenshotHandlers.length - 1];
+                    if (handler)
+                        handler({
+                            event: scmsg.action
+                        } as pxt.editor.ScreenshotData)
                 }
-            } else if (msg.type == "recorder") {
-                const scmsg = msg as pxsim.SimulatorRecorderMessage;
-                const handler = this.screenshotHandlers[this.screenshotHandlers.length - 1];
-                if (handler)
-                    handler({
-                        event: scmsg.action
-                    } as pxt.editor.ScreenshotData)
-            }
-        }, false);
+            }, false);
+        }
     }
 
     shouldShowHomeScreen() {
@@ -200,7 +210,8 @@ export class ProjectView
         pxt.debug(`page visibility: ${active}`)
         this.setState({ active: active });
 
-        if (!active && this.state.autoRun) {
+        // @LPC@ don't consider this if simulator is disabled
+        if (!active && this.state.autoRun && !this.disableSimulator) {
             if (simulator.driver.state == pxsim.SimulatorState.Running) {
                 this.suspendSimulator();
                 this.setState({ resumeOnVisibility: true });
@@ -212,7 +223,7 @@ export class ProjectView
                 let id = this.state.header ? this.state.header.id : '';
                 workspace.initAsync()
                     .done(() => !this.state.home && id ? this.loadHeaderAsync(workspace.getHeader(id), this.state.editorState) : Promise.resolve());
-            } else if (this.state.resumeOnVisibility) {
+            } else if (!this.disableSimulator && this.state.resumeOnVisibility) { // @LPC@ escape
                 this.setState({ resumeOnVisibility: false });
                 // We did a save when the page was hidden, no need to save again.
                 this.runSimulator();
@@ -277,7 +288,10 @@ export class ProjectView
     componentDidUpdate() {
         this.saveSettings()
         this.editor.domUpdate();
-        simulator.setState(this.state.header ? this.state.header.editor : '', this.state.tutorialOptions && !!this.state.tutorialOptions.tutorial)
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            simulator.setState(this.state.header ? this.state.header.editor : '', this.state.tutorialOptions && !!this.state.tutorialOptions.tutorial)
+        }
         this.editor.resize();
 
         let p = Promise.resolve();
@@ -322,7 +336,8 @@ export class ProjectView
         return this.saveTypeScriptAsync()
             .then(() => {
                 let txt = this.editor.getCurrentSource()
-                if (txt != this.editorFile.content)
+                // @LPC@ escape
+                if (!this.disableSimulator && txt != this.editorFile.content)
                     simulator.setDirty();
                 if (this.editor.isIncomplete()) return Promise.resolve();
                 return this.editorFile.setContentAsync(txt);
@@ -330,7 +345,8 @@ export class ProjectView
     }
 
     isEmbedSimActive(): boolean {
-        return this.state.embedSimView;
+        // @LPC@ cannot embed simulator when it is disabled
+        return (!this.disableSimulator) && this.state.embedSimView;
     }
 
     isBlocksActive(): boolean {
@@ -513,11 +529,14 @@ export class ProjectView
     }
 
     openSimView() {
-        if (this.state.embedSimView) {
-            this.startStopSimulator();
-        } else {
-            this.setState({ embedSimView: true });
-            this.startSimulator();
+        // @LPC@ escape this behavior if sim is disabled
+        if (!this.disableSimulator) {
+            if (this.state.embedSimView) {
+                this.startStopSimulator();
+            } else {
+                this.setState({ embedSimView: true });
+                this.startSimulator();
+            }
         }
     }
 
@@ -607,7 +626,7 @@ export class ProjectView
                     if (this.state.autoRun) {
                         const output = pkg.mainEditorPkg().outputPkg.files["output.txt"];
                         if (output && !output.numDiagnosticsOverride
-                            && this.state.autoRun) {
+                            && this.state.autoRun && !this.disableSimulator) { // @LPC@ escape
                             if (this.editor == this.blocksEditor) this.autoRunBlocksSimulator();
                             else this.autoRunSimulator();
                         }
@@ -658,33 +677,35 @@ export class ProjectView
 
     public componentDidMount() {
         this.allEditors.forEach(e => e.prepare())
-        simulator.init(document.getElementById("boardview"), {
-            orphanException: brk => {
-                // TODO: start debugging session
-                // TODO: user friendly error message
-                core.warningNotification(lf("Program Error: {0}", brk.exceptionMessage));
-            },
-            highlightStatement: (stmt, brk) => {
-                if (this.editor) return this.editor.highlightStatement(stmt, brk);
-                return false;
-            },
-            restartSimulator: () => this.restartSimulator(),
-            onStateChanged: (state) => {
-                switch (state) {
-                    case pxsim.SimulatorState.Paused:
-                    case pxsim.SimulatorState.Unloaded:
-                    case pxsim.SimulatorState.Suspended:
-                    case pxsim.SimulatorState.Pending:
-                    case pxsim.SimulatorState.Stopped:
-                        this.setState({ simState: pxt.editor.SimState.Stopped });
-                        break;
-                    case pxsim.SimulatorState.Running:
-                        this.setState({ simState: pxt.editor.SimState.Running });
-                        break;
-                }
-            },
-            editor: this.state.header ? this.state.header.editor : ''
-        })
+        if (!this.disableSimulator) {
+            simulator.init(document.getElementById("boardview"), {
+                orphanException: brk => {
+                    // TODO: start debugging session
+                    // TODO: user friendly error message
+                    core.warningNotification(lf("Program Error: {0}", brk.exceptionMessage));
+                },
+                highlightStatement: (stmt, brk) => {
+                    if (this.editor) return this.editor.highlightStatement(stmt, brk);
+                    return false;
+                },
+                restartSimulator: () => this.restartSimulator(),
+                onStateChanged: (state) => {
+                    switch (state) {
+                        case pxsim.SimulatorState.Paused:
+                        case pxsim.SimulatorState.Unloaded:
+                        case pxsim.SimulatorState.Suspended:
+                        case pxsim.SimulatorState.Pending:
+                        case pxsim.SimulatorState.Stopped:
+                            this.setState({ simState: pxt.editor.SimState.Stopped });
+                            break;
+                        case pxsim.SimulatorState.Running:
+                            this.setState({ simState: pxt.editor.SimState.Running });
+                            break;
+                    }
+                },
+                editor: this.state.header ? this.state.header.editor : ''
+            })
+        }
         this.forceUpdate(); // we now have editors prepared
     }
 
@@ -724,7 +745,8 @@ export class ProjectView
         return core.showLoadingAsync("updateeditorfile", lf("loading editor..."), this.setStateAsync({ updatingEditorFile: true })
             .then(() => {
                 simRunning = this.state.simState != pxt.editor.SimState.Stopped;
-                if (!this.state.currFile.virtual) { // switching to serial should not reset the sim
+                // @LPC@ escape this since we know that simRunning will be true if it is disabled
+                if (!this.disableSimulator && !this.state.currFile.virtual) { // switching to serial should not reset the sim
                     this.stopSimulator();
                     if (simRunning || this.state.autoRun) {
                         simulator.setPending();
@@ -897,51 +919,54 @@ export class ProjectView
     }
 
     handleMessage(msg: pxsim.SimulatorMessage) {
-        switch (msg.type) {
-            case "popoutcomplete":
-                this.setState({ sideDocsCollapsed: true, sideDocsLoadUrl: '' })
-                break;
-            case "tutorial":
-                let t = msg as pxsim.TutorialMessage;
-                switch (t.subtype) {
-                    case 'loaded':
-                        let tt = msg as pxsim.TutorialLoadedMessage;
-                        if (tt.toolboxSubset && Object.keys(tt.toolboxSubset).length > 0) {
-                            this.setState({
-                                editorState: {
-                                    searchBar: false,
-                                    filters: { blocks: tt.toolboxSubset, defaultState: pxt.editor.FilterState.Hidden }
-                                }
-                            });
-                            this.editor.filterToolbox(tt.toolboxSubset, tt.showCategories);
-                        }
-                        let tutorialOptions = this.state.tutorialOptions;
-                        tutorialOptions.tutorialReady = true;
-                        tutorialOptions.tutorialStepInfo = tt.stepInfo;
-                        this.setState({ tutorialOptions: tutorialOptions });
-                        const fullscreen = tutorialOptions.tutorialStepInfo[0].fullscreen;
-                        if (fullscreen) this.showTutorialHint();
-                        else {
-                            this.showLightbox();
-                        }
-                        core.hideLoading("tutorial");
-                        break;
-                    case 'error':
-                        let te = msg as pxsim.TutorialFailedMessage;
-                        pxt.reportException(te.message);
-                        core.errorNotification(lf("We're having trouble loading this tutorial, please try again later."));
-                        this.setState({ tutorialOptions: undefined });
-                        // Delete the project created for this tutorial
-                        let curr = pkg.mainEditorPkg().header
-                        curr.isDeleted = true;
-                        curr.tutorial = undefined;
-                        workspace.saveAsync(curr, {})
-                            .then(() => {
-                                this.openHome();
-                            }).finally(() => core.hideLoading("tutorial"));
-                        break;
-                }
-                break;
+        // @LPC@ no handlemessage for simulator if simulator is disabled
+        if (!this.disableSimulator) {
+            switch (msg.type) {
+                case "popoutcomplete":
+                    this.setState({ sideDocsCollapsed: true, sideDocsLoadUrl: '' })
+                    break;
+                case "tutorial":
+                    let t = msg as pxsim.TutorialMessage;
+                    switch (t.subtype) {
+                        case 'loaded':
+                            let tt = msg as pxsim.TutorialLoadedMessage;
+                            if (tt.toolboxSubset && Object.keys(tt.toolboxSubset).length > 0) {
+                                this.setState({
+                                    editorState: {
+                                        searchBar: false,
+                                        filters: { blocks: tt.toolboxSubset, defaultState: pxt.editor.FilterState.Hidden }
+                                    }
+                                });
+                                this.editor.filterToolbox(tt.toolboxSubset, tt.showCategories);
+                            }
+                            let tutorialOptions = this.state.tutorialOptions;
+                            tutorialOptions.tutorialReady = true;
+                            tutorialOptions.tutorialStepInfo = tt.stepInfo;
+                            this.setState({ tutorialOptions: tutorialOptions });
+                            const fullscreen = tutorialOptions.tutorialStepInfo[0].fullscreen;
+                            if (fullscreen) this.showTutorialHint();
+                            else {
+                                this.showLightbox();
+                            }
+                            core.hideLoading("tutorial");
+                            break;
+                        case 'error':
+                            let te = msg as pxsim.TutorialFailedMessage;
+                            pxt.reportException(te.message);
+                            core.errorNotification(lf("We're having trouble loading this tutorial, please try again later."));
+                            this.setState({ tutorialOptions: undefined });
+                            // Delete the project created for this tutorial
+                            let curr = pkg.mainEditorPkg().header
+                            curr.isDeleted = true;
+                            curr.tutorial = undefined;
+                            workspace.saveAsync(curr, {})
+                                .then(() => {
+                                    this.openHome();
+                                }).finally(() => core.hideLoading("tutorial"));
+                            break;
+                    }
+                    break;
+            }
         }
     }
 
@@ -992,8 +1017,12 @@ export class ProjectView
             return checkAsync.then(() => this.openHome());
 
         pxt.debug(`loading ${h.id} (pxt v${h.targetVersion})`);
-        this.stopSimulator(true);
-        if (pxt.appTarget.simulator && pxt.appTarget.simulator.aspectRatio)
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            this.stopSimulator(true);
+        }
+        // @LPC@ just check to make sure sim isn't disabled
+        if (!this.disableSimulator && pxt.appTarget.simulator && pxt.appTarget.simulator.aspectRatio)
             simulator.driver.preload(pxt.appTarget.simulator.aspectRatio);
         this.clearSerial()
         this.firstRun = true
@@ -1015,7 +1044,10 @@ export class ProjectView
                 if (!this.state || this.state.header != h) {
                     this.showPackageErrorsOnNextTypecheck();
                 }
-                simulator.setDirty();
+                // @LPC@ escape
+                if (!this.disableSimulator) {
+                    simulator.setDirty();
+                }
                 return compiler.newProjectAsync();
             }).then(() => compiler.applyUpgradesAsync())
             .then(() => {
@@ -1428,6 +1460,10 @@ export class ProjectView
 
     requestScreenshotPromise: Promise<string>;
     requestScreenshotAsync(): Promise<string> {
+        // @LPC@ escape;
+        if (this.disableSimulator) {
+            return Promise.resolve('');
+        }
         if (this.requestScreenshotPromise)
             return this.requestScreenshotPromise;
 
@@ -2019,6 +2055,8 @@ export class ProjectView
 
     startStopSimulator(opts?: pxt.editor.SimulatorStartOptions) {
         switch (this.state.simState) {
+            case pxt.editor.SimState.Disabled:
+            // @LPC@ disabled, do nothing
             case pxt.editor.SimState.Starting:
             case pxt.editor.SimState.Pending:
                 // button smashing, do nothing
@@ -2034,81 +2072,105 @@ export class ProjectView
     }
 
     toggleTrace(intervalSpeed?: number) {
-        const tracing = !!this.state.tracing;
-        const debugging = !!this.state.debugging;
-        if (tracing) {
-            this.editor.clearHighlightedStatements();
-            simulator.setTraceInterval(0);
-        } else {
-            simulator.setTraceInterval(intervalSpeed || simulator.SLOW_TRACE_INTERVAL);
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            const tracing = !!this.state.tracing;
+            const debugging = !!this.state.debugging;
+            if (tracing) {
+                this.editor.clearHighlightedStatements();
+                simulator.setTraceInterval(0);
+            } else {
+                simulator.setTraceInterval(intervalSpeed || simulator.SLOW_TRACE_INTERVAL);
+            }
+            this.setState({ tracing: !tracing, debugging: debugging && !tracing },
+                () => this.restartSimulator())
         }
-        this.setState({ tracing: !tracing, debugging: debugging && !tracing },
-            () => this.restartSimulator())
     }
 
     setTrace(enabled: boolean, intervalSpeed?: number) {
-        if (!!this.state.tracing != enabled) {
-            this.toggleTrace(intervalSpeed);
-        }
-        else if (this.state.tracing) {
-            simulator.setTraceInterval(intervalSpeed || simulator.SLOW_TRACE_INTERVAL);
-            this.startSimulator();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            if (!!this.state.tracing != enabled) {
+                this.toggleTrace(intervalSpeed);
+            }
+            else if (this.state.tracing) {
+                simulator.setTraceInterval(intervalSpeed || simulator.SLOW_TRACE_INTERVAL);
+                this.startSimulator();
+            }
         }
     }
 
     proxySimulatorMessage(content: string) {
-        simulator.proxy({
-            type: "custom",
-            content: content
-        } as pxsim.SimulatorCustomMessage);
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            simulator.proxy({
+                type: "custom",
+                content: content
+            } as pxsim.SimulatorCustomMessage);
+        }
     }
 
     toggleSimulatorCollapse() {
-        const state = this.state;
-        if (state.simState == pxt.editor.SimState.Stopped && state.collapseEditorTools)
-            this.startStopSimulator();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            const state = this.state;
+            if (state.simState == pxt.editor.SimState.Stopped && state.collapseEditorTools)
+                this.startStopSimulator();
 
-        if (state.collapseEditorTools) {
-            this.expandSimulator();
-        }
-        else {
-            this.collapseSimulator();
+            if (state.collapseEditorTools) {
+                this.expandSimulator();
+            }
+            else {
+                this.collapseSimulator();
+            }
         }
     }
 
     expandSimulator() {
-        if (pxt.appTarget.simulator.headless) {
-            simulator.unhide();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            if (pxt.appTarget.simulator.headless) {
+                simulator.unhide();
+            }
+            else {
+                this.startSimulator();
+            }
+            this.setState({ collapseEditorTools: false });
         }
-        else {
-            this.startSimulator();
-        }
-        this.setState({ collapseEditorTools: false });
     }
 
     collapseSimulator() {
-        simulator.hide(() => {
-            this.setState({ collapseEditorTools: true });
-        })
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            simulator.hide(() => {
+                this.setState({ collapseEditorTools: true });
+            })
+        }
     }
 
     // Close on escape
     closeOnEscape = (e: KeyboardEvent) => {
-        const charCode = core.keyCodeFromEvent(e);
-        if (charCode !== core.ESC_KEY) return
-        e.preventDefault()
-        this.toggleSimulatorFullscreen();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            const charCode = core.keyCodeFromEvent(e);
+            if (charCode !== core.ESC_KEY) return
+            e.preventDefault()
+            this.toggleSimulatorFullscreen();
+        }
     }
 
     toggleSimulatorFullscreen() {
-        if (!this.state.fullscreen) {
-            document.addEventListener('keydown', this.closeOnEscape);
-        } else {
-            document.removeEventListener('keydown', this.closeOnEscape);
-        }
-        this.closeFlyout();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            if (!this.state.fullscreen) {
+                document.addEventListener('keydown', this.closeOnEscape);
+            } else {
+                document.removeEventListener('keydown', this.closeOnEscape);
+            }
+            this.closeFlyout();
 
-        this.setState({ fullscreen: !this.state.fullscreen });
+            this.setState({ fullscreen: !this.state.fullscreen });
+        }
     }
 
     closeFlyout() {
@@ -2116,12 +2178,16 @@ export class ProjectView
     }
 
     toggleMute() {
-        simulator.mute(!this.state.mute);
-        this.setState({ mute: !this.state.mute });
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            simulator.mute(!this.state.mute);
+            this.setState({ mute: !this.state.mute });
+        }
     }
 
     openInstructions() {
-        const running = this.state.simState != pxt.editor.SimState.Stopped;
+        // @LPC@ a disabled simulator is never running
+        const running = (!this.disableSimulator) && (this.state.simState != pxt.editor.SimState.Stopped);
         if (running) this.stopSimulator();
         make.makeAsync()
             .finally(() => {
@@ -2167,6 +2233,11 @@ export class ProjectView
     }
 
     shouldStartSimulator(): boolean {
+        // @LPC@ a disabled simulator should never start
+        if (this.disableSimulator) {
+            return false
+        }
+
         switch (this.state.simState) {
             case pxt.editor.SimState.Starting:
             case pxt.editor.SimState.Running:
@@ -2182,21 +2253,28 @@ export class ProjectView
     }
 
     restartSimulator() {
-        const isDebug = this.state.tracing || this.state.debugging;
-        if (this.state.simState == pxt.editor.SimState.Stopped
-            || simulator.driver.isDebug() != !!isDebug)
-            this.startSimulator();
-        else {
-            simulator.driver.restart(); // fast restart
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            const isDebug = this.state.tracing || this.state.debugging;
+            if (this.state.simState == pxt.editor.SimState.Stopped
+                || simulator.driver.isDebug() != !!isDebug)
+                this.startSimulator();
+            else {
+                simulator.driver.restart(); // fast restart
+            }
+            // TODO: typescript breakpoints
+            if (isDebug)
+                this.blocksEditor.setBreakpointsFromBlocks();
+            else
+                this.blocksEditor.clearBreakpoints();
         }
-        // TODO: typescript breakpoints
-        if (isDebug)
-            this.blocksEditor.setBreakpointsFromBlocks();
-        else
-            this.blocksEditor.clearBreakpoints();
     }
 
     startSimulator(opts?: pxt.editor.SimulatorStartOptions) {
+        // @LPC@ escape
+        if (this.disableSimulator) {
+            return Promise.resolve();
+        }
         pxt.tickEvent('simulator.start');
         const isDebug = this.state.debugging || this.state.tracing;
         const isDebugMatch = simulator.driver.isDebug() == isDebug;
@@ -2211,28 +2289,38 @@ export class ProjectView
     }
 
     stopSimulator(unload?: boolean, opts?: pxt.editor.SimulatorStartOptions) {
-        pxt.tickEvent('simulator.stop')
-        const clickTrigger = opts && opts.clickTrigger;
-        pxt.debug(`stop sim (autorun ${this.state.autoRun})`)
-        if (this.runToken) {
-            this.runToken.cancel()
-            this.runToken = null
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            pxt.tickEvent('simulator.stop')
+            const clickTrigger = opts && opts.clickTrigger;
+            pxt.debug(`stop sim (autorun ${this.state.autoRun})`)
+            if (this.runToken) {
+                this.runToken.cancel()
+                this.runToken = null
+            }
+            simulator.stop(unload);
+            const autoRun = this.state.autoRun && !clickTrigger; // if user pressed stop, don't restart
+            this.setState({ simState: pxt.editor.SimState.Stopped, autoRun: autoRun });
         }
-        simulator.stop(unload);
-        const autoRun = this.state.autoRun && !clickTrigger; // if user pressed stop, don't restart
-        this.setState({ simState: pxt.editor.SimState.Stopped, autoRun: autoRun });
     }
 
     suspendSimulator() {
-        pxt.tickEvent('simulator.suspend')
-        if (this.runToken) {
-            this.runToken.cancel()
-            this.runToken = null
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            pxt.tickEvent('simulator.suspend')
+            if (this.runToken) {
+                this.runToken.cancel()
+                this.runToken = null
+            }
+            simulator.suspend()
         }
-        simulator.suspend()
     }
 
     runSimulator(opts: compiler.CompileOptions = {}): Promise<void> {
+        // @LPC@ escape
+        if (this.disableSimulator) {
+            return Promise.resolve();
+        }
         const emptyRun = this.firstRun && opts.background && pxt.appTarget.simulator && !!pxt.appTarget.simulator.emptyRunCode
         this.firstRun = false
 
@@ -2300,12 +2388,19 @@ export class ProjectView
     ///////////////////////////////////////////////////////////
 
     simDebug() {
-        pxt.tickEvent("menu.debug.sim")
-        this.stopSimulator();
-        this.runSimulator({ debug: true });
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            pxt.tickEvent("menu.debug.sim")
+            this.stopSimulator();
+            this.runSimulator({ debug: true });
+        }
     }
 
     hwDebug() {
+        // @LPC@ escape
+        if (this.disableSimulator) {
+            return Promise.resolve();
+        }
         pxt.tickEvent("menu.debug.hw")
         let start = Promise.resolve()
         if (this.state.simState != pxt.editor.SimState.Running || !simulator.driver.runOptions.debug)
@@ -2325,31 +2420,46 @@ export class ProjectView
     }
 
     toggleDebugging() {
-        const state = !this.state.debugging;
-        this.setState({ debugging: state, tracing: false }, () => {
-            this.renderCore()
-            if (this.editor) {
-                this.editor.updateBreakpoints();
-                this.editor.updateToolbox();
-            }
-            this.restartSimulator();
-        });
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            const state = !this.state.debugging;
+            this.setState({ debugging: state, tracing: false }, () => {
+                this.renderCore()
+                if (this.editor) {
+                    this.editor.updateBreakpoints();
+                    this.editor.updateToolbox();
+                }
+                this.restartSimulator();
+            });
+        }
     }
 
     dbgPauseResume() {
-        simulator.dbgPauseResume();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            simulator.dbgPauseResume();
+        }
     }
 
     dbgStepOver() {
-        simulator.dbgStepOver();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            simulator.dbgStepOver();
+        }
     }
 
     dbgStepInto() {
-        simulator.dbgStepInto();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            simulator.dbgStepInto();
+        }
     }
 
     dbgInsertBreakpoint() {
-        this.editor.insertBreakpoint();
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            this.editor.insertBreakpoint();
+        }
     }
 
     editText() {
@@ -2962,23 +3072,26 @@ export class ProjectView
                 {inTutorial ? <div id="maineditor" className={sandbox ? "sandbox" : ""} role="main">
                     <tutorial.TutorialCard ref="tutorialcard" parent={this} />
                 </div> : undefined}
-                <div id="simulator">
-                    <div id="filelist" className="ui items">
-                        <div id="boardview" className={`ui vertical editorFloat`} role="region" aria-label={lf("Simulator")}>
+                {/* @LPC@ Just ditch the whole component if it's disabled*/}
+                {!this.disableSimulator ? (
+                    <div id="simulator">
+                        <div id="filelist" className="ui items">
+                            <div id="boardview" className={`ui vertical editorFloat`} role="region" aria-label={lf("Simulator")}>
+                            </div>
+                            <simtoolbar.SimulatorToolbar parent={this} />
+                            <div className="ui item portrait hide hidefullscreen">
+                                {pxt.options.debug ? <sui.Button key='hwdebugbtn' className='teal' icon="xicon chip" text={"Dev Debug"} onClick={this.hwDebug} /> : ''}
+                            </div>
+                            {useSerialEditor ?
+                                <div id="serialPreview" className="ui editorFloat portrait hide hidefullscreen">
+                                    <serialindicator.SerialIndicator ref="simIndicator" isSim={true} onClick={this.openSimSerial} />
+                                    <serialindicator.SerialIndicator ref="devIndicator" isSim={false} onClick={this.openDeviceSerial} />
+                                </div> : undefined}
+                            {sandbox || isBlocks || this.editor == this.serialEditor ? undefined : <filelist.FileList parent={this} />}
+                            <div id="filelistOverlay" role="button" title={lf("Open in fullscreen")} onClick={this.toggleSimulatorFullscreen}></div>
                         </div>
-                        <simtoolbar.SimulatorToolbar parent={this} />
-                        <div className="ui item portrait hide hidefullscreen">
-                            {pxt.options.debug ? <sui.Button key='hwdebugbtn' className='teal' icon="xicon chip" text={"Dev Debug"} onClick={this.hwDebug} /> : ''}
-                        </div>
-                        {useSerialEditor ?
-                            <div id="serialPreview" className="ui editorFloat portrait hide hidefullscreen">
-                                <serialindicator.SerialIndicator ref="simIndicator" isSim={true} onClick={this.openSimSerial} />
-                                <serialindicator.SerialIndicator ref="devIndicator" isSim={false} onClick={this.openDeviceSerial} />
-                            </div> : undefined}
-                        {sandbox || isBlocks || this.editor == this.serialEditor ? undefined : <filelist.FileList parent={this} />}
-                        <div id="filelistOverlay" role="button" title={lf("Open in fullscreen")} onClick={this.toggleSimulatorFullscreen}></div>
                     </div>
-                </div>
+                ) : undefined}
                 <div id="maineditor" className={(sandbox ? "sandbox" : "") + (inDebugMode ? "debugging" : "")} role="main" aria-hidden={inHome}>
                     {this.allEditors.map(e => e.displayOuter())}
                 </div>

@@ -7,8 +7,13 @@ import * as sui from "./sui";
 type ISettingsProps = pxt.editor.ISettingsProps;
 
 export class EditorToolbar extends data.Component<ISettingsProps, {}> {
+
+    private disableSimulator: boolean;
+
     constructor(props: ISettingsProps) {
         super(props);
+
+        this.disableSimulator = pxt.appTarget.disableSimulator;
 
         this.saveProjectName = this.saveProjectName.bind(this);
         this.compile = this.compile.bind(this);
@@ -60,13 +65,19 @@ export class EditorToolbar extends data.Component<ISettingsProps, {}> {
     }
 
     startStopSimulator(view?: string) {
-        pxt.tickEvent("editortools.startStopSimulator", { view: view, collapsed: this.getCollapsedState(), headless: this.getHeadlessState() }, { interactiveConsent: true });
-        this.props.parent.startStopSimulator({ clickTrigger: true });
+        // @LPC@ escape
+        if (!this.disableSimulator) {
+            pxt.tickEvent("editortools.startStopSimulator", { view: view, collapsed: this.getCollapsedState(), headless: this.getHeadlessState() }, { interactiveConsent: true });
+            this.props.parent.startStopSimulator({ clickTrigger: true });
+        }
     }
 
     restartSimulator(view?: string) {
+        // @LPC@ escape
+        if (!this.disableSimulator) {
         pxt.tickEvent("editortools.restart", { view: view, collapsed: this.getCollapsedState(), headless: this.getHeadlessState() }, { interactiveConsent: true });
         this.props.parent.restartSimulator();
+        }
     }
 
     toggleTrace(view?: string) {
@@ -89,7 +100,7 @@ export class EditorToolbar extends data.Component<ISettingsProps, {}> {
     }
 
     private getHeadlessState(): string {
-        return pxt.appTarget.simulator.headless ? "true" : "false";
+        return pxt.appTarget.simulator ? (pxt.appTarget.simulator.headless ? "true" : "false") : "false";
     }
 
     renderCore() {
@@ -103,8 +114,10 @@ export class EditorToolbar extends data.Component<ISettingsProps, {}> {
         const readOnly = pxt.shell.isReadOnly();
         const tutorial = tutorialOptions ? tutorialOptions.tutorial : false;
         const simOpts = pxt.appTarget.simulator;
-        const headless = simOpts.headless;
-        const collapsed = (hideEditorFloats || collapseEditorTools) && (!tutorial || headless);
+        // @LPC@ treat the sim view as if it is headless (no controls when collapsed) when disabled
+        const headless = (!this.disableSimulator) && simOpts.headless;
+        // @LPC@ Consider the simulator always "collapsed" if it is disabled
+        const collapsed = (this.disableSimulator) || ((hideEditorFloats || collapseEditorTools) && (!tutorial || headless));
         const isEditor = this.props.parent.isBlocksEditor() || this.props.parent.isTextEditor();
         if (!isEditor) return <div />;
 
@@ -124,13 +137,14 @@ export class EditorToolbar extends data.Component<ISettingsProps, {}> {
         const hasUndo = this.props.parent.editor.hasUndo();
         const hasRedo = this.props.parent.editor.hasRedo();
 
-        const showCollapsed = !tutorial && !sandbox && !targetTheme.simCollapseInMenu;
+        // @LPC@ if sim is disabled, never show the collapsed button
+        const showCollapsed = (!this.disableSimulator) && (!tutorial && !sandbox && !targetTheme.simCollapseInMenu);
         const showProjectRename = !tutorial && !readOnly && !isController && !targetTheme.hideProjectRename && !debugging;
         const showUndoRedo = !tutorial && !readOnly && !debugging;
         const showZoomControls = true;
 
         const run = !targetTheme.bigRunButton;
-        const restart = run && !simOpts.hideRestart;
+        const restart = run && simOpts && !simOpts.hideRestart;
         const trace = !!targetTheme.enableTrace;
         const tracing = this.props.parent.state.tracing;
         const traceTooltip = tracing ? lf("Disable Slow-Mo") : lf("Slow-Mo")
