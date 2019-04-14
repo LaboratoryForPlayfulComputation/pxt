@@ -39,6 +39,8 @@ declare namespace pxt {
         title?: string;
         cloud?: AppCloud;
         simulator?: AppSimulator;
+        // @LPC@ set to true to disable the simulator entirely. The options given in the `simulator` key will be ignored.
+        disableSimulator: boolean;
         blocksprj: ProjectTemplate;
         tsprj: ProjectTemplate;
         runtime?: RuntimeOptions;

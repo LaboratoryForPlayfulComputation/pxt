@@ -59,22 +59,26 @@ export class Editor extends toolboxeditor.ToolboxEditor {
         }
 
         this.breakpointsSet = breakpoints;
-        simulator.driver.setBreakpoints(breakpoints);
+        // @LPC@ escape
+        if (!pxt.appTarget.disableSimulator) simulator.driver.setBreakpoints(breakpoints);
     }
 
     addBreakpointFromEvent(blockId: string) {
         this.breakpointsSet.push(this.breakpointsByBlock[blockId]);
-        simulator.driver.setBreakpoints(this.breakpointsSet);
+        // @LPC@ escape
+        if (!pxt.appTarget.disableSimulator) simulator.driver.setBreakpoints(this.breakpointsSet);
     }
 
     removeBreakpointFromEvent(blockId: string) {
         let breakpointId = this.breakpointsByBlock[blockId];
         this.breakpointsSet.filter(breakpoint => breakpoint != breakpointId);
-        simulator.driver.setBreakpoints(this.breakpointsSet);
+        // @LPC@ escape
+        if (!pxt.appTarget.disableSimulator) simulator.driver.setBreakpoints(this.breakpointsSet);
     }
 
     clearBreakpoints(): void {
-        simulator.driver.setBreakpoints([]);
+        // @LPC@ escape
+        if (!pxt.appTarget.disableSimulator) simulator.driver.setBreakpoints([]);
     }
 
     setVisible(v: boolean) {
@@ -907,7 +911,7 @@ export class Editor extends toolboxeditor.ToolboxEditor {
             media: pxt.webConfig.commitCdnUrl + "blockly/media/",
             sound: true,
             trashcan: false,
-            collapse: false,
+            collapse: true,
             comments: true,
             disable: false,
             readOnly: readOnly,

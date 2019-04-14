@@ -4,7 +4,8 @@ namespace pxt.editor {
         // waiting to be started
         Pending,
         Starting,
-        Running
+        Running,
+        Disabled
     }
     export interface IEditor {
         undo(): void;
