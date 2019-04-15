@@ -279,6 +279,7 @@ declare namespace pxt {
         availableLocales?: string[]; // the list of enabled language codes
         useUploadMessage?: boolean; // change "Download" text to "Upload"
         downloadIcon?: string; // which icon io use for download
+        downloadText?: string; // @LPC@ override text of the "Download" button
         blockColors?: Map<string>; // block namespace colors, used for build in categories
         blockIcons?: Map<string>;
         blocklyColors?: Blockly.Colours; // Blockly workspace, flyout and other colors

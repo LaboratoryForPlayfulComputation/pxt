@@ -1522,6 +1522,23 @@ export class ProjectView
             .then(img => this.encodeProjectAsPNGAsync(img, showDialog));
     }
 
+    // @LPC@ Upload project handler
+    customDownloadProjectAsync(): Promise<void> {
+        const mpkg = pkg.mainPkg;
+
+        if (pxt.commands.customDownloadProjectAsync) {
+            core.infoNotification(lf("Uploading..."));
+            this.syncPreferredEditor();
+            return mpkg.saveToJsonAsync()
+                .then(project => pxt.commands.customDownloadProjectAsync(project, {
+                    showError: (msg) => core.errorNotification(msg),
+                    showInfo: (msg) => core.infoNotification(msg)
+                }));
+        } else {
+            return Promise.resolve();
+        }
+    }
+
     saveProjectToFileAsync(): Promise<void> {
         const mpkg = pkg.mainPkg;
         if (saveAsBlocks()) {
@@ -1843,6 +1860,17 @@ export class ProjectView
     ////////////             Compile              /////////////
     ///////////////////////////////////////////////////////////
 
+    // @LPC@ upload handler
+    customDownload() {
+        if (!this.state.header) return undefined;
+        this.setState({isSaving: true});
+
+        return this.saveFileAsync()
+            .then(() => this.customDownloadProjectAsync())
+            .finally(() => this.setStateAsync({ isSaving: false }))
+            .done();
+    }
+
     saveAndCompile() {
         if (!this.state.header) return undefined;
         this.setState({ isSaving: true });
@@ -1925,6 +1953,12 @@ export class ProjectView
 
         if (pxt.appTarget.compile.saveAsPNG && pxt.hasHwVariants() && !pxt.hwVariant) {
             this.saveAndCompile();
+            return;
+        }
+
+        // @LPC@ if custom download method is enabled, then use that instead.
+        if (pxt.commands.customDownloadProjectAsync) {
+            this.customDownload();
             return;
         }
 
@@ -3468,6 +3502,11 @@ function initExtensionsAsync(): Promise<void> {
             }
             if (res.beforeCompile) {
                 theEditor.beforeCompile = res.beforeCompile;
+            }
+            // @LPC@ register custom doanload project
+            if (res.customDownloadProjectAsync) {
+                pxt.debug(`\tadded custom doanload project async`);
+                pxt.commands.customDownloadProjectAsync = res.customDownloadProjectAsync;
             }
             if (res.toolboxOptions) {
                 if (res.toolboxOptions.blocklyToolbox) {

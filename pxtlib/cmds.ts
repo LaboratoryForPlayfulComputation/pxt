@@ -5,6 +5,12 @@ namespace pxt.commands {
         reportDeviceNotFoundAsync?: (docPath: string, resp?: ts.pxtc.CompileResult) => Promise<void>;
     }
 
+    // @LPC@ binders for notification toasts
+    export interface CustomDownloadOptions {
+        showError?: (msg: string) => void;
+        showInfo?: (msg: string) => void;
+    }
+
     // overriden by targets
     export let deployCoreAsync: (r: ts.pxtc.CompileResult, d?: DeployOptions) => Promise<void> = undefined;
     export let patchCompileResultAsync: (r: pxtc.CompileResult) => Promise<void> = undefined;
@@ -14,4 +20,7 @@ namespace pxt.commands {
     export let saveProjectAsync: (project: pxt.cpp.HexFile) => Promise<void> = undefined;
     export let electronDeployAsync: (r: ts.pxtc.CompileResult) => Promise<void> = undefined; // A pointer to the Electron deploy function, so that targets can access it in their extension.ts
     export let webUsbPairDialogAsync: (confirmAsync: (options: any) => Promise<number>) => Promise<number> = undefined;
+
+    // @LPC@ add custom Download handler
+    export let customDownloadProjectAsync: (project: pxt.cpp.HexFile, opts?: CustomDownloadOptions) => Promise<void> = undefined;
 }

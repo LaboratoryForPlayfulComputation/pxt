@@ -329,6 +329,8 @@ namespace pxt.editor {
         toolboxOptions?: IToolboxOptions;
         blocklyPatch?: (pkgTargetVersion: string, dom: Element) => void;
         webUsbPairDialogAsync?: (confirmAsync: (options: any) => Promise<number>) => Promise<number>;
+        // @LPC@ custom download project
+        customDownloadProjectAsync?: (project: pxt.cpp.HexFile, opts?: pxt.commands.CustomDownloadOptions) => Promise<void>;
     }
 
     export interface FieldExtensionOptions {
