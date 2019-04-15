@@ -125,6 +125,7 @@
     "test:err": "jake testerr",
     "test:fmt": "jake testfmt",
     "test:lang": "jake testlang",
-    "update": "jake update"
+    "update": "jake update",
+    "prepare" : "PXT_ENV=production jake"
   }
 }
