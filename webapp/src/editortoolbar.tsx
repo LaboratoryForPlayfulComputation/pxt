@@ -111,7 +111,8 @@ export class EditorToolbar extends data.Component<ISettingsProps, {}> {
         const disableFileAccessinMaciOs = targetTheme.disableFileAccessinMaciOs && (pxt.BrowserUtils.isIOS() || pxt.BrowserUtils.isMac());
         const showSave = !readOnly && !isController && !targetTheme.saveInMenu && !tutorial && !debugging && !disableFileAccessinMaciOs;
         const compile = pxt.appTarget.compile;
-        const compileBtn = compile.hasHex || compile.saveAsPNG || compile.useUF2;
+        // @LPC@ display the button if it is forced
+        const compileBtn = pxt.commands.customDownloadProjectAsync || compile.hasHex || compile.saveAsPNG || compile.useUF2;
         const compileTooltip = lf("Download your code to the {0}", targetTheme.boardName);
         const compileLoading = !!compiling;
         const running = simState == pxt.editor.SimState.Running;
@@ -137,7 +138,8 @@ export class EditorToolbar extends data.Component<ISettingsProps, {}> {
         const debug = !!targetTheme.debugger && !readOnly;
         const debugTooltip = debugging ? lf("Disable Debugging") : lf("Debugging")
         const downloadIcon = pxt.appTarget.appTheme.downloadIcon || "download";
-        const downloadText = pxt.appTarget.appTheme.useUploadMessage ? lf("Upload") : lf("Download");
+        // @LPC@ use override download text if defined
+        const downloadText = pxt.appTarget.appTheme.downloadText || (pxt.appTarget.appTheme.useUploadMessage ? lf("Upload") : lf("Download"));
 
         const bigRunButtonTooltip = [lf("Stop"), lf("Starting"), lf("Run Code in Game")][simState || 0];
 
